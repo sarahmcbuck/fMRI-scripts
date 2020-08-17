@@ -1,0 +1,110 @@
+%MATLAB code to run group analyses of fMRI data from Queen Square Institute of Neurology
+%Sarah.Buck@ucl.ac.uk
+
+clear all
+spmpath=('/local/spm12-20160115');
+addpath('/local/spm12-20160115');
+spm_jobman('initcfg');
+spm('defaults','FMRI');
+matlabbatch = {};
+
+
+Time = '02'; % '01' for pre-op, or '02' for post-op
+group = [''];			
+subgroup = {'Controls'; 'LTLE'; 'RTLE'};
+
+
+
+main_dir = ['/mounts/auto/p1602mem/Data/'];
+design = ['']; %Block of Event
+ 
+for g=1:numel(subgroup)			%for each subgroup
+    if strcmp(subgroup{g},'LTLE')	
+    group = ['Patients'];
+    elseif strcmp(subgroup{g},'RTLE')
+    group = ['Patients'];
+    else
+    group = [''];
+    disp(group)
+    end
+   
+
+analysis = {'Face_Block'; 'Face_Event'; 'WordEnc_Block'; 'WordEnc_Event'; 'WordRetr_Block'; 'WordRetr_Event'};
+
+
+
+C{1} = {'Baseline'; 'Face encoding'; 'Face encoding > baseline'; 'Face recognition'; 'Face recognition > baseline'}; % Face block
+C{2} = {'Hits'; 'Misses'; 'Correct rejections'; 'Familiar'; 'Hits > Misses'; 'Hits > Familiar'; 'Hits > Misses + Familiar'; 'Hits > Misses + Correct rejections'; 'Hits > Misses + Correct rejections + Familiar'; 'Hits + Correct rejections > Familiar + Misses'; 'Successful > Unsuccessful encoding'; 'Unsuccessful > successful encoding'; 'Successful > unsuccessful'; 'Successful encoding'; 'Unsuccessful encoding'}; % Face event
+C{3} = {'Baseline > word encoding'; 'Word encoding'; 'Word encoding > baseline'; 'Baseline'}; % Word Enc block
+C{4} = {'Successful encoding'; 'Unsuccessful encoding'; 'Successful > Unsuccessful encoding'; 'Unsuccessful > Successful encoding'}; % Word Enc event
+C{5} = {'Baseline'; 'Baseline > Recall'; 'Baseline > Recognition'; 'Recall'; 'Recall > Baseline'; 'Recall > Recognition'; 'Recognition'; 'Recognition > Baseline'; 'Recognition > Recall'}; % Word Retr block
+C{6} = {'Hits'; 'Misses'; 'Correct rejections'; 'Familiar'; 'Hits > Misses'; 'Hits > Misses + Correct rejections'; 'Hits > Misses + Correct rejections + Familiar'; 'Hits > Misses + Familiar'; 'Hits > Familiar'; 'Hits > Familiar + Correct rejections'; 'Hits + Correct rejections > Misses + Familiar'; 'Hits > Correct rejections'}; % Word Retr event
+
+
+for A=1:numel(analysis) %for each analysis
+if strcmp(analysis{A},'Face_Block') || strcmp(analysis{A},'WordEnc_Block') || strcmp(analysis{A},'WordRetr_Block');
+design = 'Block';
+else design = 'Event';
+end
+disp(strcat('***',analysis{A},'***'))
+
+
+
+for r=1:numel(C{A})
+B = extractBefore(analysis{A},"_");
+outdir = fullfile('/home/sbuck/Desktop/p1602mem/Analyses/One-sample/',Time, B, design, group, subgroup{g}, C{A}{r});
+
+if isdir(outdir)
+    rmdir(outdir, 's'); %if already exists, delete it, to avoid message from SPM "SPM.mat already exists...overwriting etc"
+end
+mkdir(outdir); %create directory
+
+
+disp(C{A}{r}) 
+
+
+
+scansdir = fullfile('/home/sbuck/Desktop/p1602mem/Analyses/Cons/', Time, B, design, group, subgroup{g},C{A}{r});
+scans = char(fullfile(scansdir, strcat('*', Time, '*.nii')));
+listscans = dir(scans);
+funfiles = {};
+for i=1:size(listscans)
+ funfiles{i}=char(fullfile(listscans(i).folder,listscans(i).name));
+end 
+funfiles = funfiles';
+
+
+ifa = length(matlabbatch) + 1;
+matlabbatch{ifa}.spm.stats.factorial_design.dir = {outdir};
+matlabbatch{ifa}.spm.stats.factorial_design.des.t1.scans = funfiles;
+matlabbatch{ifa}.spm.stats.factorial_design.cov = struct('c', {}, 'cname', {}, 'iCFI', {}, 'iCC', {});
+matlabbatch{ifa}.spm.stats.factorial_design.multi_cov = struct('files', {}, 'iCFI', {}, 'iCC', {});
+matlabbatch{ifa}.spm.stats.factorial_design.masking.tm.tm_none = 1;
+matlabbatch{ifa}.spm.stats.factorial_design.masking.im = 1;
+matlabbatch{ifa}.spm.stats.factorial_design.masking.em = {''};
+matlabbatch{ifa}.spm.stats.factorial_design.globalc.g_omit = 1;
+matlabbatch{ifa}.spm.stats.factorial_design.globalm.gmsca.gmsca_no = 1;
+matlabbatch{ifa}.spm.stats.factorial_design.globalm.glonorm = 1;
+
+ie = length(matlabbatch) + 1;
+matlabbatch{ie}.spm.stats.fmri_est.spmmat(1) = cfg_dep('Factorial design specification: SPM.mat File', substruct('.','val', '{}',{ifa}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch{ie}.spm.stats.fmri_est.write_residuals = 0;
+matlabbatch{ie}.spm.stats.fmri_est.method.Classical = 1;
+
+ic = length(matlabbatch) + 1;
+matlabbatch{ic}.spm.stats.con.spmmat(1) = cfg_dep('Model estimation: SPM.mat File', substruct('.','val', '{}',{ie}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch{ic}.spm.stats.con.consess{1}.tcon.name = C{A}{r};
+matlabbatch{ic}.spm.stats.con.consess{1}.tcon.weights = 1;
+matlabbatch{ic}.spm.stats.con.consess{1}.tcon.sessrep = 'none';
+matlabbatch{ic}.spm.stats.con.delete = 1;
+
+spm_jobman('run',matlabbatch);
+clear matlabbatch;
+matlabbatch = {};
+
+end %for each contrast within each analysis e.g. Encoding > baseline
+end %for each analysis e.g. Face_Block
+end
+
+
+
