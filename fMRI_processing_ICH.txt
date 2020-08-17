@@ -1,0 +1,661 @@
+% script created by Sarah Buck (sarah.buck@ucl.ac.uk)
+% to download fMRI scans, arrange  data in the right folders, pre-process data, and run 1st and 2nd level analyses
+% Here, the data is organised as follow:
+% participant's folder (e.g. 881), then time folder (e.g. Time_1 or Time_ 2).
+
+clear all 
+spm_path = 'S:\ICH_DCNU_ESM _fMRI\spm12'; % where SPM is 
+addpath(spm_path);
+addpath('S:\ICH_DNP_CNN _Phase4\Task - Reinstatement2\Matlab_Stuff\dicm2nii') % where dicm2nii is
+
+spm('defaults','fmri');
+spm_jobman('initcfg');
+clear matlabbatch 
+matlabbatch = {};
+
+
+
+P_num{1} = {'882'};  % Controls example: {'111'; '222'}
+P_num{2} = {};	% TLE
+
+group = {'Controls', 'TLE'}; 
+time = {'Time_ 1', 'Time_ 2', 'Time_ 3'}; 
+Directory = ('S:\ICH_DCNU_Memory\Sarah\fMRI_test'); % where the raw data is
+onset_dir = ('S:\ICH_DCNU_Memory\Filipa\Memory_study_FB\Data\fMRI\onsets' ); % where the onsets_events.xlsx file is 
+T1_folder = fullfile(time_dir,'T1');
+T1_file = dir(char(fullfile(T1_folder, 'T1_*.nii')));
+T1 = fullfile(T1_path.file,T1_path.file);
+
+runs = {'Run1', 'Run2', 'Run3'};
+
+for g=1:numel(group)	% for each group
+for s=1:numel(P_num{g}) % for each subject within each group 
+P=char(P_num{g}(s));
+disp(P)
+
+for t=1:numel(time)		% for each time (e.g. Time_1)
+T=time{t};
+time_dir = char(fullfile(Directory,group{g},P,T));
+
+if exist(time_dir, 'dir')
+disp(T)
+cd(time_dir);
+
+% convert dicoms to nii 
+if ~exist(fullfile(time_dir,'T1'), 'dir')
+dicm2nii(fullfile(time_dir,'DICOMS'), fullfile(time_dir,'DICOMS'), 4);
+else disp('dicoms already converted to nii')
+end
+
+% move nii to correct folders
+% DTI
+if ~exist(fullfile(time_dir,'DTI'),'dir')
+mkdir DTI;
+end
+
+% T1
+if ~exist(fullfile(time_dir,'T1'), 'dir')
+mkdir T1;
+T1 = dir(char(fullfile(time_dir, 'DICOMS', 't1_*.nii')));
+T1_img = fullfile(T1.folder,T1.name)
+T1_dir = fullfile(time_dir,'T1')
+movefile(T1_img, T1_dir)
+end
+
+for r=1:numel(runs)
+run_directory = fullfile(time_dir,runs{r}); 
+
+if strcmp(runs{r},'Run1')
+prefix = 'r1';
+elseif strcmp(runs{r},'Run2')
+prefix = 'r2';
+elseif strcmp(runs{r},'Run3')
+prefix = 'r3';
+end
+
+% move nii files to correct folder
+if ~exist(run_directory,'dir')
+mkdir(run_directory)
+nii = char(fullfile(time_dir, 'DICOMS', strcat('*_',prefix,'_*.nii')));
+list_nii = dir(nii);
+for i=1:size(list_nii)
+funfiles{i}=char(fullfile(list_nii (i).folder,list_nii (i).name));
+funfiles=funfiles';
+fclose all;
+movefile(funfiles{i},run_directory); 
+end
+
+pause(5)
+
+% move blip files to "other" folder
+mkdir(run_directory, 'other')
+blip = char(fullfile(run_directory, '*blip*.nii'));
+blip_list = dir(blip);
+for i=1:size(blip_list)
+blipfiles{i}=char(fullfile(blip_list (i).folder,blip_list (i).name));
+blipfiles=blipfiles';
+fclose all;
+movefile(blipfiles{i}, fullfile(run_directory,'other'));
+end 
+
+% move dummy scans to "other" folder
+dummy = char(fullfile(run_directory, strcat('*_',prefix,'_*.nii')));
+list_dummy = dir(dummy);
+for i=1:size(list_dummy)
+dumfiles{i}=char(fullfile(list_dummy (i).folder,list_dummy (i).name));
+dumfiles=dumfiles';
+if any([strfind(dumfiles{i}, '001.nii'), strfind(dumfiles{i}, '002.nii'), strfind(dumfiles{i}, '003.nii'), strfind(dumfiles{i}, '004.nii')]) 
+movefile(dumfiles{i}, fullfile(run_directory,'other'))
+end
+end 
+
+pause(5)
+
+% move other unwanted scans to "other" folder
+other = char(fullfile(run_directory, strcat('*_',prefix,'_*.nii')));
+list_other = dir(other);
+for i=1:size(list_other)
+otherfiles{i}=char(fullfile(list_other (i).folder,list_other (i).name));
+otherfiles=otherfiles';
+if isempty(strfind(otherfiles{i}, '_ 00'))
+movefile(otherfiles{i}, fullfile(run_directory,'other'))
+end
+end
+
+end % if the run folder doesn't exist already
+end 
+
+
+(* ::PageBreak:: *)
+(**)
+
+
+% Realign 
+ for r=1:numel(runs)
+ run_directory = fullfile(time_dir,runs{r}); 
+disp(strcat('***processing', {' '},P, {' '}, runs{r}, '***'))
+
+  cd(run_directory);
+isel = length(matlabbatch) + 1;        
+matlabbatch {isel}.cfg_basicio.file_dir.file_ops.file_fplist.dir = {run_directory};
+matlabbatch {isel}.cfg_basicio.file_dir.file_ops.file_fplist.filter = '^mbep';
+matlabbatch {isel}.cfg_basicio.file_dir.file_ops.file_fplist.rec = 'FPList';
+
+if ~isempty(dir(fullfile(run_directory, 'rm*0005.nii')))
+disp(strcat(runs{r},{' '}, 'already realigned'))
+else 
+ir = length(matlabbatch) + 1;        
+matlabbatch {ir}.spm.spatial.realign.estwrite.data{1}(1) = cfg_dep('File Selector (Batch Mode): Selected Files (^mbep)', substruct('.','val', '{}',{isel}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.quality = 0.9;
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.sep = 4;
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.fwhm = 5;
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.rtm = 1;
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.interp = 2;
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.wrap = [0 0 0];
+matlabbatch {ir}.spm.spatial.realign.estwrite.eoptions.weight = '';
+matlabbatch {ir}.spm.spatial.realign.estwrite.roptions.which = [2 1];
+matlabbatch {ir}.spm.spatial.realign.estwrite.roptions.interp = 4;
+matlabbatch {ir}.spm.spatial.realign.estwrite.roptions.wrap = [0 0 0];
+matlabbatch {ir}.spm.spatial.realign.estwrite.roptions.mask = 1;
+matlabbatch {ir}.spm.spatial.realign.estwrite.roptions.prefix = 'r';
+
+spm_jobman('run',matlabbatch);
+clear matlabbatch;
+matlabbatch = {};
+end % if realigned already done
+ end % for each run
+disp('finished realignment')
+
+
+end  
+end 
+end 
+end 
+
+
+
+clear matlabbatch 
+matlabbatch = {};
+
+if isfolder(time_dir)
+disp(T)
+cd(time_dir);
+
+
+%%% create onsets
+if ~isempty(dir(char(fullfile(time_dir,strcat(P,'_onset _*.mat')))))
+disp('onset files already created')
+else
+    
+infile = fullfile(onset_dir,'onsets_events');   
+
+% find the fMRI version 
+[~,~,raw]=xlsread(infile, 1); % open sheet 1 of the "onsets_events" document
+for idx = 1:numel(raw) % convert numbers to string 
+    if isnumeric(raw{idx})
+        raw{idx} = num2str(raw{idx});
+    end
+end
+
+fmri_version= raw(strcmp(raw(:,3),time{t})|strcmp(raw(:,2),P), 4);% find fMRI version for that participant
+disp(strcat('fMRI version', {' '}, fmri_version))
+
+% define the fMRI version
+if strcmp(fmri_version, 'A') 
+response_sheet = 'responseA';
+onset_sheet = 'onsetA';
+else
+response_sheet = 'responseB';
+onset_sheet = 'onsetB';
+end 
+
+% copy data from "response" sheet to "onset" sheet
+[~,~,raw]=xlsread(infile, response_sheet);
+for idx = 1:numel(raw) % convert numbers to string 
+    if isnumeric(raw{idx})
+        raw{idx} = num2str(raw{idx});
+    end
+end
+col = strcmp(raw(2,:),P); % find, within row 2, the column where P is
+col_num = find(col==1);
+column_response = raw(2:92, col_num); 
+xlswrite(fullfile(onset_dir,'onsets_events.xlsx'), column_response, onset_sheet, 'C2:C92'); % copy the response column to the onset sheet 
+disp('***onsets are calculated in sheet "onset" of onsets_events.xlsx document***')
+
+% create onset files for each individual
+for r=1:numel(runs)
+    if strcmp(runs{r},'Run1')
+        range = 'D3:I32';
+    elseif strcmp(runs{r},'Run2')
+        range = 'D33:I62';
+    elseif strcmp(runs{r},'Run3')
+        range = 'D63:I92';
+    end
+
+[num,txt,raw] = xlsread(infile,onset_sheet,range);
+
+CorrEnc=raw(:,1); % first column within the defined range
+CorrEnc=CorrEnc(~cellfun('isempty',CorrEnc)); % remove empty cells
+CorrEnc=cell2mat(CorrEnc); % change format
+CorrEnc = transpose(CorrEnc); % transpose from vertical to horizontal
+if isempty(CorrEnc)
+    CorrEnc = [50]; % if onset is empty, replace empty cell with onset "50", just so that the contrast can be created
+end
+
+IncorrEnc=raw(:,2); % second column within the defined range
+IncorrEnc=IncorrEnc(~cellfun('isempty',IncorrEnc)); % remove empty cells
+IncorrEnc=cell2mat(IncorrEnc); % change format
+IncorrEnc = transpose(IncorrEnc); % transpose from vertical to horizontal
+if isempty(IncorrEnc)
+    IncorrEnc = [50];
+end
+
+Hits=raw(:,4); % fourth column within the defined range
+Hits=Hits(~cellfun('isempty',Hits)); % remove empty cells
+Hits=cell2mat(Hits); % change format
+Hits = transpose(Hits); % transpose from vertical to horizontal
+if isempty(Hits)
+    Hits = [50];
+end
+
+Misses=raw(:,5); % fifth column within the defined range
+Misses=Misses(~cellfun('isempty',Misses)); % remove empty cells
+Misses=cell2mat(Misses); % change format
+Misses = transpose(Misses); % transpose from vertical to horizontal
+if isempty(Misses)
+    Misses = [10];
+end
+
+CorrRej=raw(:,6); % sixth column within the defined range
+CorrRej=CorrRej(~cellfun('isempty',CorrRej)); % remove empty cells
+CorrRej=cell2mat(CorrRej); % change format
+CorrRej = transpose(CorrRej); % transpose from vertical to horizontal
+if isempty(CorrRej)
+    CorrRej = [50];
+end
+
+names{1}=['CorrEnc'];
+names{2}=['IncorrEnc'];
+names{4}=['Hits'];
+names{5}=['Misses'];
+names{6}=['CorrRej'];
+
+durations{1}=[0];
+durations{2}=[0];
+durations{4}=[0];
+durations{5}=[0];
+durations{6}=[0];
+
+onsets{1}=[CorrEnc];
+onsets{2}=[IncorrEnc];
+onsets{4}=[Hits];
+onsets{5}=[Misses];
+onsets{6}=[CorrRej];
+
+% baseline
+range_b = 'F93:F112'; % define the range where the data is found
+[num,txt,raw] = xlsread(infile,onset_sheet,range_b);
+Baseline=raw(:,1); % first column within the defined range
+Baseline=Baseline(~cellfun('isempty',Baseline)); % remove empty cells
+Baseline=cell2mat(Baseline); % change format
+Baseline = transpose(Baseline); % transpose from vertical to horizontal
+
+names{3}=['Baseline'];
+durations{3}=[0];
+onsets{3}=[Baseline];
+
+% save the onset file to each participant's folder
+outfile= [fullfile(time_dir,strcat(P,'_onset _',runs{r}))];
+save(outfile, 'names', 'durations', 'onsets');
+end % for each run
+end % if onset files already created
+disp('***onsets files are saved in subject folder***')
+
+
+
+
+(* ::PageBreak:: *)
+(**)
+
+
+
+%% segment T1
+if ~isempty(dir(fullfile(T1_folder,'y_t1*')))
+    disp('T1 already segmented')
+else
+isegT1 = length(matlabbatch) + 1;  
+matlabbatch {isegT1}.spm.spatial.preproc.channel.vols(1) = {T1};
+matlabbatch {isegT1}.spm.spatial.preproc.channel.biasreg = 0.001;
+matlabbatch {isegT1}.spm.spatial.preproc.channel.biasfwhm = 60;
+matlabbatch {isegT1}.spm.spatial.preproc.channel.write = [0 1];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(1).tpm = {fullfile(spm_path,'tpm\TPM.nii,1')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(1).ngaus = 1;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(1).native = [1 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(1).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(2).tpm = {fullfile(spm_path,'tpm\TPM.nii,2')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(2).ngaus = 1;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(2).native = [1 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(2).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(3).tpm = {fullfile(spm_path,'tpm\TPM.nii,3')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(3).ngaus = 2;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(3).native = [1 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(3).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(4).tpm = {fullfile(spm_path,'tpm\TPM.nii,4')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(4).ngaus = 3;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(4).native = [1 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(4).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(5).tpm = {fullfile(spm_path,'tpm\TPM.nii,5')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(5).ngaus = 4;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(5).native = [1 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(5).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(6).tpm = {fullfile(spm_path,'tpm\TPM.nii,6')};
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(6).ngaus = 2;
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(6).native = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.tissue(6).warped = [0 0];
+matlabbatch {isegT1}.spm.spatial.preproc.warp.mrf = 1;
+matlabbatch {isegT1}.spm.spatial.preproc.warp.cleanup = 1;
+matlabbatch {isegT1}.spm.spatial.preproc.warp.reg = [0 0.001 0.5 0.05 0.2];
+matlabbatch {isegT1}.spm.spatial.preproc.warp.affreg = 'mni';
+matlabbatch {isegT1}.spm.spatial.preproc.warp.fwhm = 0;
+matlabbatch {isegT1}.spm.spatial.preproc.warp.samp = 3;
+matlabbatch {isegT1}.spm.spatial.preproc.warp.write = [0 1];
+spm_jobman('run',matlabbatch);
+end 
+
+%% Normalise T1 
+def_field = dir(char(fullfile(T1_folder,'y_t1*')));
+def = fullfile(T1_folder,def_field.name);
+
+if ~isempty(dir(fullfile(T1_folder,'w*.nii')))
+    disp('T1 already normalised')
+else
+inorm_T1 = length(matlabbatch) + 1;
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.subj.def(1) = {def};
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.subj.resample(1) = {T1};
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.woptions.bb = [-78 -112 -70
+                                                           78 76 85];
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.woptions.vox = [2 2 2];
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.woptions.interp = 4;
+matlabbatch {inorm_T1}.spm.spatial.normalise.write.woptions.prefix = 'w';
+spm_jobman('run',matlabbatch);
+end 
+
+
+
+(* ::PageBreak:: *)
+(**)
+
+
+
+for r=1:numel(runs)
+run_folder = fullfile(group_folder,'\',P,'\',T,runs{r});
+disp(strcat('***processing', {' '},P, {' '}, runs{r}, '***'))
+if ~isempty(dir(fullfile(run_folder,'s*.nii')))
+    disp('files already pre-processed')
+else
+   
+%% select files 
+ifilt = length(matlabbatch) + 1;  
+matlabbatch {ifilt}.cfg_basicio.file_dir.file_ops.file_fplist.dir = {run_folder};
+matlabbatch {ifilt}.cfg_basicio.file_dir.file_ops.file_fplist.filter = '^rmb';
+% matlabbatch {ifilt}.cfg_basicio.file_dir.file_ops.file_fplist.filter = '^rmbep';
+matlabbatch {ifilt}.cfg_basicio.file_dir.file_ops.file_fplist.rec = 'FPList';
+
+i_mean = length(matlabbatch) + 1;  
+matlabbatch {i_mean}.cfg_basicio.file_dir.file_ops.file_fplist.dir = {run_folder};
+matlabbatch {i_mean}.cfg_basicio.file_dir.file_ops.file_fplist.filter = '^mean';
+matlabbatch {i_mean}.cfg_basicio.file_dir.file_ops.file_fplist.rec = 'FPList';
+
+
+%% Coregister functional images to T1
+icoreg = length(matlabbatch) + 1;
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.ref(1) = {T1};
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.source(1) = cfg_dep('File Selector (Batch Mode): Selected Files (^mean)', substruct('.','val', '{}',{i_mean}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.other(1) = cfg_dep('File Selector (Batch Mode): Selected Files (^filt_run)', substruct('.','val', '{}',{ifilt}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.eoptions.cost_fun = 'nmi';
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.eoptions.sep = [4 2];
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.eoptions.tol = [0.02 0.02 0.02 0.001 0.001 0.001 0.01 0.01 0.01 0.001 0.001 0.001];
+matlabbatch {icoreg}.spm.spatial.coreg.estimate.eoptions.fwh.m = [7 7];
+
+% Normalise fMRI
+inorm = length(matlabbatch) + 1;
+matlabbatch {inorm}.spm.spatial.normalise.write.subj.def(1) = {def};
+matlabbatch {inorm}.spm.spatial.normalise.write.subj.resample(1) = cfg_dep('Coregister: Estimate: Coregistered Images', substruct('.','val', '{}',{icoreg}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','cfiles'));
+matlabbatch {inorm}.spm.spatial.normalise.write.woptions.bb = [-78 -112 -70
+                                                           78 76 85];
+matlabbatch {inorm}.spm.spatial.normalise.write.woptions.vox = [2 2 2];
+matlabbatch {inorm}.spm.spatial.normalise.write.woptions.interp = 4;
+matlabbatch {inorm}.spm.spatial.normalise.write.woptions.prefix = 'w';
+
+
+%% smooth images
+ismooth = length(matlabbatch) + 1;  
+matlabbatch {ismooth}.spm.spatial.smooth.data(1) = cfg_dep('Normalise: Write: Normalised Images (Subj 1)', substruct('.','val', '{}',{inorm}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('()',{1}, '.','files'));
+matlabbatch {ismooth}.spm.spatial.smooth.fwhm = [8 8 8];
+matlabbatch {ismooth}.spm.spatial.smooth.dtype = 0;
+matlabbatch {ismooth}.spm.spatial.smooth.im = 0;
+matlabbatch {ismooth}.spm.spatial.smooth.prefix = 's';
+
+spm_jobman('run',matlabbatch);
+end
+clear matlabbatch
+matlabbatch = {};
+end 
+
+
+(* ::PageBreak:: *)
+(**)
+
+
+disp(strcat('***preprocessing done for', {' '}, P, {' '},'...now starting 1stlevel***'))
+
+results_block = fullfile(time_dir,'results_block');
+mkdir(results_block);
+results_event = fullfile(time_dir,'results_event');
+mkdir(results_event);
+onset_block = ('S:\ICH_DCNU\Memory_Sarah\fMRI\Analyses\Onsets\Onsets.mat'); % The onset file for blocks (this will be the same for every participant so we can define it here)
+
+matlabbatch = {};
+
+%% select rp files 
+run1_rp = dir(char(fullfile(time_dir,'Run1','rp*.txt'));
+run2_rp = dir(char(fullfile(time_dir,'Run2','rp*.txt'));
+run3_rp = dir(char(fullfile(time_dir,'Run3','rp*.txt'));
+
+run1_rp = fullfile(run1_rp.folder,run1_rp.name);
+run2_rp = fullfile(run2_rp.folder,run2_rp.name);
+run3_rp = fullfile(run3_rp.folder,run3_rp.name);
+
+%% select nii files - run 1
+scansdir_ 1 = fullfile(time_dir,'Run1');
+scans_ 1 = char(fullfile(scansdir_ 1, 'swr*.nii'));
+listscans_ 1 = dir(scans_ 1);
+funfiles_ 1 = {};
+for i=1:size(listscans_ 1)
+    funfiles_ 1{i} = char(fullfile(listscans_ 1(i).folder, listscans_ 1(i).name));    
+end
+funfiles_ 1 = funfiles_ 1';
+
+%% select nii files - run 2
+scansdir_ 2 = fullfile(time_dir,'Run2');
+scans_ 2 = char(fullfile(scansdir_ 2, 'swr*.nii'));
+listscans_ 2 = dir(scans_ 1);
+funfiles_ 2 = {};
+for i=1:size(listscans_ 2)
+    funfiles_ 2{i} = char(fullfile(listscans_ 2(i).folder, listscans_ 2(i).name));    
+end
+funfiles_ 2 = funfiles_ 2';
+
+%% select nii files - run 3
+scansdir_ 3 = fullfile(time_dir,'Run3');
+scans_ 3 = char(fullfile(scansdir_ 3, 'swr*.nii'));
+listscans_ 3 = dir(scans_ 3);
+funfiles_ 3 = {};
+for i=1:size(listscans_ 3)
+    funfiles_ 3{i} = char(fullfile(listscans_ 3(i).folder, listscans_ 3(i).name));    
+end
+funfiles_ 3 = funfiles_ 3';
+
+
+%% 1st level analysis - BLOCK
+
+%% Analysis
+iblock = length(matlabbatch) + 1;
+matlabbatch {iblock}.spm.stats.fmri_spec.dir = {results_block};
+matlabbatch {iblock}.spm.stats.fmri_spec.timing.units = 'secs';
+matlabbatch {iblock}.spm.stats.fmri_spec.timing.RT = 1.25;
+matlabbatch {iblock}.spm.stats.fmri_spec.timing.fmri_t = 16;
+matlabbatch {iblock}.spm.stats.fmri_spec.timing.fmri_t0 = 8;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).scans = funfiles_ 1;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).multi = {onset_block};
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).regress = struct('name', {}, 'val', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).multi_reg = run1_rp;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(1).hpf = 320;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).scans = funfiles_ 2;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).multi = {onset_block};
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).regress = struct('name', {}, 'val', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).multi_reg = run2_rp;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(2).hpf = 320;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).scans = funfiles_ 3;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).multi = {onset_block};
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).regress = struct('name', {}, 'val', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).multi_reg = run3_rp;
+matlabbatch {iblock}.spm.stats.fmri_spec.sess(3).hpf = 320;
+matlabbatch {iblock}.spm.stats.fmri_spec.fact = struct('name', {}, 'levels', {});
+matlabbatch {iblock}.spm.stats.fmri_spec.bases.hrf.derivs = [1 1];
+matlabbatch {iblock}.spm.stats.fmri_spec.volt = 1;
+matlabbatch {iblock}.spm.stats.fmri_spec.global = 'None';
+matlabbatch {iblock}.spm.stats.fmri_spec.mthresh = 0.8;
+matlabbatch {iblock}.spm.stats.fmri_spec.mask = {''};
+matlabbatch {iblock}.spm.stats.fmri_spec.cvi = 'AR (1)';
+
+iblock_e = length(matlabbatch) + 1;
+matlabbatch {iblock_e}.spm.stats.fmri_est.spmmat(1) = cfg_dep('fMRI model specification: SPM.mat File', substruct('.','val', '{}',{iblock}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch {iblock_e}.spm.stats.fmri_est.write_residuals = 0;
+matlabbatch {iblock_e}.spm.stats.fmri_est.method.Classical = 1;
+
+
+%% contrasts 
+iblock_con = length(matlabbatch) + 1;
+matlabbatch {iblock_con}.spm.stats.con.spmmat(1) = cfg_dep('Model estimation: SPM.mat File', substruct('.','val', '{}',{iblock_e}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch {iblock_con}.spm.stats.con.consess{1}.tcon.name = 'Language';
+matlabbatch {iblock_con}.spm.stats.con.consess{1}.tcon.weights = [1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{1}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{2}.tcon.name = 'Baseline';
+matlabbatch {iblock_con}.spm.stats.con.consess{2}.tcon.weights = [0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{2}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{3}.tcon.name = 'Memory';
+matlabbatch {iblock_con}.spm.stats.con.consess{3}.tcon.weights = [0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{3}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{4}.tcon.name = 'Language>Baseline';
+matlabbatch {iblock_con}.spm.stats.con.consess{4}.tcon.weights = [1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{4}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{5}.tcon.name = 'Memory>Baseline';
+matlabbatch {iblock_con}.spm.stats.con.consess{5}.tcon.weights = [0 0 0 -1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{5}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{6}.tcon.name = 'Memory>Language';
+matlabbatch {iblock_con}.spm.stats.con.consess{6}.tcon.weights = [-1 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{6}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.consess{7}.tcon.name = 'Language>Memory';
+matlabbatch {iblock_con}.spm.stats.con.consess{7}.tcon.weights = [1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {iblock_con}.spm.stats.con.consess{7}.tcon.sessrep = 'none';
+matlabbatch {iblock_con}.spm.stats.con.delete = 0;
+
+spm_jobman('run',matlabbatch);
+clear matlabbatch
+matlabbatch = {};
+
+    %% 1st level analysis - EVENT
+    
+%% select onset files
+onset_run1 = (fullfile(time_dir,strcat(P,'_onset _Run1.mat')));
+onset_run2 = (fullfile(time_dir,strcat(P,'_onset _Run2.mat')));
+onset_run3 = (fullfile(time_dir,strcat(P,'_onset _Run3.mat')));
+
+%% 1st level analysis
+ievent = length(matlabbatch) + 1;
+matlabbatch {ievent}.spm.stats.fmri_spec.dir = {results_event};
+matlabbatch {ievent}.spm.stats.fmri_spec.timing.units = 'secs';
+matlabbatch {ievent}.spm.stats.fmri_spec.timing.RT = 1.25;
+matlabbatch {ievent}.spm.stats.fmri_spec.timing.fmri_t = 16;
+matlabbatch {ievent}.spm.stats.fmri_spec.timing.fmri_t0 = 8;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).scans = funfiles_ 1;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).multi(1) = {onset_run1};
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).regress = struct('name', {}, 'val', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).multi_reg = run1_rp; 
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(1).hpf = 320;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).scans = funfiles_ 2;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).multi(1) = {onset_run2};
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).regress = struct('name', {}, 'val', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).multi_reg = run2_rp; 
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(2).hpf = 320;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).scans = funfiles_ 3;
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).cond = struct('name', {}, 'onset', {}, 'duration', {}, 'tmod', {}, 'pmod', {}, 'orth', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).multi(1) = {onset_run3};
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).regress = struct('name', {}, 'val', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).multi_reg = run3_rp; 
+matlabbatch {ievent}.spm.stats.fmri_spec.sess(3).hpf = 320;
+matlabbatch {ievent}.spm.stats.fmri_spec.fact = struct('name', {}, 'levels', {});
+matlabbatch {ievent}.spm.stats.fmri_spec.bases.hrf.derivs = [1 1];
+matlabbatch {ievent}.spm.stats.fmri_spec.volt = 1;
+matlabbatch {ievent}.spm.stats.fmri_spec.global = 'None';
+matlabbatch {ievent}.spm.stats.fmri_spec.mthresh = 0.8;
+matlabbatch {ievent}.spm.stats.fmri_spec.mask = {''};
+matlabbatch {ievent}.spm.stats.fmri_spec.cvi = 'AR (1)';
+
+ievent_e = length(matlabbatch)+ 1;
+matlabbatch {ievent_e}.spm.stats.fmri_est.spmmat(1) = cfg_dep('fMRI model specification: SPM.mat File', substruct('.','val', '{}',{ievent}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch {ievent_e}.spm.stats.fmri_est.write_residuals = 0;
+matlabbatch {ievent_e}.spm.stats.fmri_est.method.Classical = 1;
+
+
+%% contrasts 
+ievent_con = length(matlabbatch)+ 1;
+matlabbatch {ievent_con}.spm.stats.con.spmmat(1) = cfg_dep('Model estimation: SPM.mat File', substruct('.','val', '{}',{ievent_e}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','spmmat'));
+matlabbatch {ievent_con}.spm.stats.con.consess{1}.tcon.name = 'Correctly encoded';
+matlabbatch {ievent_con}.spm.stats.con.consess{1}.tcon.weights = [1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0];
+matlabbatch {ievent_con}.spm.stats.con.consess{1}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{2}.tcon.name = 'Incorrectly encoded';
+matlabbatch {ievent_con}.spm.stats.con.consess{2}.tcon.weights = [0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0];
+matlabbatch {ievent_con}.spm.stats.con.consess{2}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{3}.tcon.name = 'Baseline';
+matlabbatch {ievent_con}.spm.stats.con.consess{3}.tcon.weights = [0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0];
+matlabbatch {ievent_con}.spm.stats.con.consess{3}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{4}.tcon.name = 'Hits';
+matlabbatch {ievent_con}.spm.stats.con.consess{4}.tcon.weights = [0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0];
+matlabbatch {ievent_con}.spm.stats.con.consess{4}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{5}.tcon.name = 'Misses';
+matlabbatch {ievent_con}.spm.stats.con.consess{5}.tcon.weights = [0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{5}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{6}.tcon.name = 'Correct rejection';
+matlabbatch {ievent_con}.spm.stats.con.consess{6}.tcon.weights = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{6}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{7}.tcon.name = 'Correctly > incorrectly encoded';
+matlabbatch {ievent_con}.spm.stats.con.consess{7}.tcon.weights = [1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{7}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{8}.tcon.name = 'Hits>Misses';
+matlabbatch {ievent_con}.spm.stats.con.consess{8}.tcon.weights = [0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{8}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{9}.tcon.name = 'Hits>Correct rejections';
+matlabbatch {ievent_con}.spm.stats.con.consess{9}.tcon.weights = [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{9}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{10}.tcon.name = 'Hits>Misses+Correct rejections';
+matlabbatch {ievent_con}.spm.stats.con.consess{10}.tcon.weights = [0 0 0 0 0 0 0 0 0 2 0 0 -1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 -1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 -1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{10}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.consess{11}.tcon.name = 'Memory success>Memory Failure';
+matlabbatch {ievent_con}.spm.stats.con.consess{11}.tcon.weights = [1 0 0 -1 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0];
+matlabbatch {ievent_con}.spm.stats.con.consess{11}.tcon.sessrep = 'none';
+matlabbatch {ievent_con}.spm.stats.con.delete = 1;
+
+spm_jobman('run',matlabbatch);
+
+end
+end
+
+ 
+
